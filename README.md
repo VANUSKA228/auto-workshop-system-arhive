@@ -7,6 +7,17 @@
 
 ---
 
+## 👥 Команда проекта
+
+| Участник | Роль | Ветка | Что сделал |
+|----------|------|-------|------------|
+| Иван | Backend | `feature/ivan-backend` | API, авторизация, JWT, роутеры |
+| Семён | Database | `feature/semen-database` | ERD, модели, миграции, seed данные |
+| Ислам | Frontend | `feature/islam-frontend` | Страницы, компоненты, валидация |
+| Идар | Frontend | `feature/idar-frontend` | Роутинг, store, API integration |
+
+---
+
 ## 🚀 Быстрый старт
 
 ### Запуск одной командой:
