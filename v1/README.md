@@ -22,8 +22,12 @@ docker-compose up --build
 - Email: `admin@autoservice.ru`
 - Пароль: `admin123`
 
-**Мастер смены:**
+**Мастер смены (Москва — Центральная):**
 - Email: `master.moscow1@autoservice.ru`
+- Пароль: `master123`
+
+**Мастер смены (Санкт-Петербург — Невский):**
+- Email: `master.spb1@autoservice.ru`
 - Пароль: `master123`
 
 **Клиенты:**
