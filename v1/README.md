@@ -55,6 +55,35 @@ docker-compose up --build
 docker-compose exec backend pytest -v
 ```
 
+### Что тестируется
+
+**test_auth.py (16 тестов):**
+- `test_login_success_admin` — вход администратора
+- `test_login_success_master` — вход мастера
+- `test_login_success_client` — вход клиента
+- `test_login_wrong_password` — неверный пароль
+- `test_login_wrong_email` — несуществующий email
+- `test_login_invalid_email_format` — неверный формат email
+- `test_protected_route_without_token` — доступ без токена
+- `test_protected_route_with_valid_token` — доступ с валидным токеном
+- `test_protected_route_with_invalid_token` — доступ с невалидным токеном
+- `test_client_self_register_success` — успешная регистрация клиента
+- `test_client_register_duplicate_email` — дубликат email
+- `test_client_register_invalid_workshop` — несуществующая мастерская
+- `test_client_register_missing_required_fields` — отсутствующие поля
+- `test_client_register_short_password` — короткий пароль
+- `test_client_register_invalid_email` — неверный email
+- `test_client_register_and_login` — регистрация и вход
+
+**test_workshops.py (7 тестов):**
+- `test_list_workshops_public_without_auth` — публичный список без авторизации
+- `test_list_workshops_public_with_auth` — публичный список с авторизацией
+- `test_list_workshops_admin` — список для админа
+- `test_list_workshops_master` — список для мастера
+- `test_list_workshops_without_auth` — доступ к списку без авторизации (запрещён)
+- `test_get_workshop_by_id_admin` — получение мастерской по ID
+- `test_get_nonexistent_workshop` — получение несуществующей мастерской
+
 ## Полезные команды
 
 **Остановка системы:**
