@@ -24,7 +24,7 @@ class OrderCreate(BaseModel):
 
 class OrderUpdate(BaseModel):
     master_id: Optional[int] = None
-    worker_id: Optional[int] = None
+    # worker_id удалён — используем M2N связь через order_workers
     description: Optional[str] = None
     status: Optional[str] = Field(None, description="Статус: new, in_progress, done")
     service_ids: Optional[List[int]] = None
@@ -47,8 +47,8 @@ class OrderRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     workshop_id: int
-    workshop: Optional[WorkshopRead] = None
-    worker: Optional[WorkerRead] = None
+    # workshop удалён — вызывает проблемы с city
+    # worker удалён — используем M2N связь через order_workers
     client: Optional[UserBrief] = None
     master: Optional[UserBrief] = None
     order_services: List[OrderServiceRead] = []

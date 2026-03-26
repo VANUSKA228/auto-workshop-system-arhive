@@ -2,12 +2,14 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, text
+from sqlalchemy import or_, and_, text
 
 from ..database import get_db
 from ..models.user import User
 from ..models.order import Order, OrderService
+from ..models.service import Service
 from ..models.worker import Worker
+from ..models.order_worker import OrderWorker, OrderServiceWorker
 from ..models.workshop import Workshop, user_workshop_link
 from ..schemas.order import OrderCreate, OrderUpdate, OrderRead
 from ..dependencies import get_current_user, role_required
@@ -15,8 +17,8 @@ from ..dependencies import get_current_user, role_required
 router = APIRouter()
 
 
-@router.get("/", response_model=list[OrderRead])
-def list_orders(
+@router.get("/")
+async def list_orders(
     status: Optional[str] = None,
     workshop_id: Optional[int] = None,
     search: Optional[str] = None,
@@ -31,18 +33,20 @@ def list_orders(
 ):
     """
     Список заявок с фильтрацией.
-    
+
     - Client: видит только свои заявки
     - Master: видит заявки своих мастерских
     - Admin: видит все заявки
-    
+
     Фильтры: status, workshop_id, search (по клиенту или авто), date_from, date_to
     """
+    from ..models.city import City
+    
     role_name = user.role.name if user.role else None
     q = db.query(Order).options(
         joinedload(Order.client),
         joinedload(Order.master),
-        joinedload(Order.workshop),
+        joinedload(Order.workshop).joinedload(Workshop.city),
         joinedload(Order.order_services).joinedload(OrderService.service),
     )
 
@@ -87,10 +91,85 @@ def list_orders(
     else:
         q = q.order_by(order_col.desc())
 
-    return q.offset(offset).limit(limit).all()
+    orders = q.offset(offset).limit(limit).all()
+    
+    # Преобразуем всё в простые типы данных (dict без ORM объектов)
+    result = []
+    for order in orders:
+        # Сериализуем order_services
+        services_list = []
+        for os in order.order_services:
+            services_list.append({
+                'service_id': os.service_id,
+                'service': {
+                    'id': os.service.id,
+                    'name': os.service.name,
+                    'price': float(os.service.price) if os.service.price else 0,
+                } if os.service else None,
+                'unit_price': float(os.unit_price) if os.unit_price else 0,
+                'quantity': os.quantity,
+            })
+        
+        order_dict = {
+            'id': order.id,
+            'client_id': order.client_id,
+            'master_id': order.master_id,
+            'car_brand': order.car_brand,
+            'car_model': order.car_model,
+            'car_year': order.car_year,
+            'description': order.description,
+            'status': order.status,
+            'created_at': str(order.created_at) if order.created_at else None,
+            'updated_at': str(order.updated_at) if order.updated_at else None,
+            'workshop_id': order.workshop_id,
+            'total_amount': float(order.total_amount) if order.total_amount else 0,
+            'paid_amount': float(order.paid_amount) if order.paid_amount else 0,
+            'order_services': services_list,
+        }
+        
+        # Клиент
+        if order.client:
+            order_dict['client'] = {
+                'id': order.client.id,
+                'first_name': order.client.first_name,
+                'last_name': order.client.last_name,
+                'phone': order.client.phone,
+            }
+        else:
+            order_dict['client'] = None
+            
+        # Мастер
+        if order.master:
+            order_dict['master'] = {
+                'id': order.master.id,
+                'first_name': order.master.first_name,
+                'last_name': order.master.last_name,
+            }
+        else:
+            order_dict['master'] = None
+        
+        # Мастерская
+        if order.workshop:
+            order_dict['workshop'] = {
+                'id': order.workshop.id,
+                'name': order.workshop.name,
+                'city_id': order.workshop.city_id,
+                'address': order.workshop.address,
+                'phone': order.workshop.phone,
+            }
+        else:
+            order_dict['workshop'] = None
+        
+        # Техники назначаются через M2N связь order_workers
+        # Для простоты возвращаем пустой список или можно добавить отдельный endpoint
+        order_dict['workers'] = []  # Пока пусто, техники назначаются отдельно
+            
+        result.append(order_dict)
+    
+    return result
 
 
-@router.get("/my", response_model=list[OrderRead])
+@router.get("/my")
 def list_my_orders(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Заявки текущего пользователя (для клиента)."""
     return (
@@ -106,7 +185,7 @@ def list_my_orders(db: Session = Depends(get_db), user: User = Depends(get_curre
     )
 
 
-@router.post("/", response_model=OrderRead)
+@router.post("/")
 def create_order(data: OrderCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """
     Создание новой заявки.
@@ -151,10 +230,17 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db), user: User = 
     db.commit()
     db.refresh(order)
 
-    # Добавляем услуги
+    # Добавляем услуги с ценой на момент заказа
     if data.service_ids and len(data.service_ids) > 0:
         for sid in data.service_ids:
-            db.add(OrderService(order_id=order.id, service_id=sid))
+            service = db.query(Service).filter(Service.id == sid).first()
+            if service:
+                db.add(OrderService(
+                    order_id=order.id,
+                    service_id=sid,
+                    unit_price=service.price,
+                    quantity=1
+                ))
         db.commit()
         db.refresh(order)
 
@@ -162,7 +248,7 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db), user: User = 
     return db.query(Order).filter(Order.id == order.id).first()
 
 
-@router.get("/{order_id}", response_model=OrderRead)
+@router.get("/{order_id}")
 def get_order(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     order = db.query(Order).options(
         joinedload(Order.client), joinedload(Order.master),
@@ -176,7 +262,7 @@ def get_order(order_id: int, db: Session = Depends(get_db), user: User = Depends
     return order
 
 
-@router.patch("/{order_id}", response_model=OrderRead)
+@router.patch("/{order_id}")
 def update_order(
     order_id: int, data: OrderUpdate,
     db: Session = Depends(get_db),
@@ -216,34 +302,33 @@ def update_order(
             if data.client_phone is not None:
                 client.phone = data.client_phone
 
-    if data.worker_id is not None:
-        # Проверяем, что работник принадлежит той же мастерской
-        worker = db.query(Worker).filter(Worker.id == data.worker_id).first()
-        if not worker:
-            raise HTTPException(400, "Работник не найден")
-        if order.workshop_id and worker.workshop_id != order.workshop_id:
-            raise HTTPException(400, "Нельзя назначить работника из другой мастерской")
-        order.worker_id = data.worker_id
-
     if data.description is not None:
         order.description = data.description
-    
+
     # Статус можно менять явно через data.status
     if data.status is not None:
         order.status = data.status
-    
+
     if data.service_ids is not None:
-        db.query(OrderService).filter(OrderService.order_id == order_id).delete()
+        # Удаляем старые услуги
+        db.query(OrderService).filter(OrderService.order_id == order_id).delete(synchronize_session=False)
+        # Добавляем новые
         for sid in data.service_ids:
-            db.add(OrderService(order_id=order_id, service_id=sid))
-            
+            service = db.query(Service).filter(Service.id == sid).first()
+            if service:
+                db.add(OrderService(
+                    order_id=order_id,
+                    service_id=sid,
+                    unit_price=service.price,
+                    quantity=1
+                ))
+
     db.commit()
     return (
         db.query(Order)
         .options(
             joinedload(Order.client),
             joinedload(Order.master),
-            joinedload(Order.worker),
             joinedload(Order.order_services).joinedload(OrderService.service),
         )
         .filter(Order.id == order_id)
@@ -275,3 +360,257 @@ def delete_order(
     db.delete(order)
     db.commit()
     return {"message": "Заявка удалена"}
+
+
+# ============================================================
+# Order Workers (M2N связь заказы ↔ техники)
+# ============================================================
+
+@router.get("/{order_id}/workers", response_model=list[dict])
+def get_order_workers(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Получить всех техников, назначенных на заявку."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Заявка не найдена")
+    
+    # Проверка прав
+    role = user.role.name if user.role else None
+    if role == "client" and order.client_id != user.id:
+        raise HTTPException(403, "Нет доступа")
+    if role == "master":
+        workshop_ids = [w.id for w in user.workshops]
+        if order.workshop_id not in workshop_ids:
+            raise HTTPException(403, "Нет доступа")
+    
+    # Получаем назначения
+    assignments = db.query(OrderWorker).filter(OrderWorker.order_id == order_id).all()
+    
+    result = []
+    for aw in assignments:
+        worker = db.query(Worker).filter(Worker.id == aw.worker_id).first()
+        result.append({
+            "worker_id": worker.id,
+            "worker_name": f"{worker.first_name} {worker.last_name}",
+            "role": aw.role,
+            "hours_spent": aw.hours_spent,
+        })
+    
+    return result
+
+
+@router.post("/{order_id}/workers", response_model=dict)
+def assign_worker_to_order(
+    order_id: int,
+    worker_id: int,
+    role: str = "main",
+    hours_spent: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(role_required("master", "admin")),
+):
+    """
+    Назначить техника на заявку.
+    """
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Заявка не найдена")
+    
+    worker = db.query(Worker).filter(Worker.id == worker_id).first()
+    if not worker:
+        raise HTTPException(404, "Техник не найден")
+    
+    # Проверка: техник должен быть из той же мастерской
+    if worker.workshop_id != order.workshop_id:
+        raise HTTPException(400, "Техник должен быть из той же мастерской")
+    
+    # Проверка прав
+    role_name = user.role.name if user.role else None
+    if role_name == "master":
+        workshop_ids = [w.id for w in user.workshops]
+        if order.workshop_id not in workshop_ids:
+            raise HTTPException(403, "Нет доступа")
+    
+    # Проверяем, не назначен ли уже
+    existing = db.query(OrderWorker).filter(
+        and_(OrderWorker.order_id == order_id, OrderWorker.worker_id == worker_id)
+    ).first()
+    if existing:
+        raise HTTPException(400, "Техник уже назначен на эту заявку")
+    
+    # Создаём назначение
+    assignment = OrderWorker(
+        order_id=order_id,
+        worker_id=worker_id,
+        role=role,
+        hours_spent=hours_spent,
+    )
+    db.add(assignment)
+    db.commit()
+    
+    return {"message": "Техник назначен", "worker_id": worker_id, "role": role}
+
+
+@router.delete("/{order_id}/workers/{worker_id}")
+def remove_worker_from_order(
+    order_id: int,
+    worker_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(role_required("master", "admin")),
+):
+    """Удалить техника из заявки."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Заявка не найдена")
+    
+    # Проверка прав
+    role_name = user.role.name if user.role else None
+    if role_name == "master":
+        workshop_ids = [w.id for w in user.workshops]
+        if order.workshop_id not in workshop_ids:
+            raise HTTPException(403, "Нет доступа")
+    
+    assignment = db.query(OrderWorker).filter(
+        and_(OrderWorker.order_id == order_id, OrderWorker.worker_id == worker_id)
+    ).first()
+    if not assignment:
+        raise HTTPException(404, "Техник не назначен на эту заявку")
+    
+    db.delete(assignment)
+    db.commit()
+    return {"message": "Техник удалён из заявки"}
+
+
+# ============================================================
+# Order Service Workers (техники на услугах)
+# ============================================================
+
+@router.get("/{order_id}/service-workers", response_model=list[dict])
+def get_order_service_workers(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Получить техников, назначенных на услуги заявки."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Заявка не найдена")
+    
+    # Проверка прав
+    role = user.role.name if user.role else None
+    if role == "client" and order.client_id != user.id:
+        raise HTTPException(403, "Нет доступа")
+    
+    assignments = db.query(OrderServiceWorker).filter(
+        OrderServiceWorker.order_id == order_id
+    ).all()
+    
+    result = []
+    for aw in assignments:
+        service = db.query(Service).filter(Service.id == aw.service_id).first()
+        worker = db.query(Worker).filter(Worker.id == aw.worker_id).first()
+        result.append({
+            "service_id": service.id,
+            "service_name": service.name,
+            "worker_id": worker.id,
+            "worker_name": f"{worker.first_name} {worker.last_name}",
+            "hours_spent": aw.hours_spent,
+        })
+    
+    return result
+
+
+@router.post("/{order_id}/service-workers", response_model=dict)
+def assign_worker_to_service(
+    order_id: int,
+    service_id: int,
+    worker_id: int,
+    hours_spent: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(role_required("master", "admin")),
+):
+    """Назначить техника на услугу."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Заявка не найдена")
+    
+    # Проверка: услуга должна быть в заявке
+    order_service = db.query(OrderService).filter(
+        and_(OrderService.order_id == order_id, OrderService.service_id == service_id)
+    ).first()
+    if not order_service:
+        raise HTTPException(400, "Услуга не найдена в заявке")
+    
+    worker = db.query(Worker).filter(Worker.id == worker_id).first()
+    if not worker:
+        raise HTTPException(404, "Техник не найден")
+    
+    # Проверка: техник из той же мастерской
+    if worker.workshop_id != order.workshop_id:
+        raise HTTPException(400, "Техник должен быть из той же мастерской")
+    
+    # Проверка прав
+    role_name = user.role.name if user.role else None
+    if role_name == "master":
+        workshop_ids = [w.id for w in user.workshops]
+        if order.workshop_id not in workshop_ids:
+            raise HTTPException(403, "Нет доступа")
+    
+    # Проверяем существующее назначение
+    existing = db.query(OrderServiceWorker).filter(
+        and_(
+            OrderServiceWorker.order_id == order_id,
+            OrderServiceWorker.service_id == service_id,
+            OrderServiceWorker.worker_id == worker_id,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(400, "Техник уже назначен на эту услугу")
+    
+    assignment = OrderServiceWorker(
+        order_id=order_id,
+        service_id=service_id,
+        worker_id=worker_id,
+        hours_spent=hours_spent,
+    )
+    db.add(assignment)
+    db.commit()
+    
+    return {"message": "Техник назначен на услугу"}
+
+
+@router.delete("/{order_id}/service-workers/{worker_id}/{service_id}")
+def remove_worker_from_service(
+    order_id: int,
+    worker_id: int,
+    service_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(role_required("master", "admin")),
+):
+    """Удалить техника из услуги."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Заявка не найдена")
+    
+    # Проверка прав
+    role_name = user.role.name if user.role else None
+    if role_name == "master":
+        workshop_ids = [w.id for w in user.workshops]
+        if order.workshop_id not in workshop_ids:
+            raise HTTPException(403, "Нет доступа")
+    
+    assignment = db.query(OrderServiceWorker).filter(
+        and_(
+            OrderServiceWorker.order_id == order_id,
+            OrderServiceWorker.service_id == service_id,
+            OrderServiceWorker.worker_id == worker_id,
+        )
+    ).first()
+    if not assignment:
+        raise HTTPException(404, "Назначение не найдено")
+    
+    db.delete(assignment)
+    db.commit()
+    return {"message": "Техник удалён из услуги"}

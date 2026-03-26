@@ -3,6 +3,7 @@ import { workersApi, Worker, WorkerCreate } from '../../api/workersApi';
 import { workshopsApi, Workshop } from '../../api/workshopsApi';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/Toast/Toast';
+import WorkerScheduleModal from '../../components/WorkerScheduleModal';
 
 const STATUS_BADGE: Record<'free' | 'assigned', string> = {
   free: 'bg-green-100 text-green-700',
@@ -17,6 +18,8 @@ export default function WorkersPage() {
   const [workshops, setWorkshops] = useState<Workshop[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [selectedWorkerForSchedule, setSelectedWorkerForSchedule] = useState<{ id: number; name: string } | null>(null);
   const [editing, setEditing] = useState<Worker | null>(null);
   const [form, setForm] = useState<WorkerCreate>({ first_name: '', last_name: '', position: '', workshop_id: null });
   const [saving, setSaving] = useState(false);
@@ -61,6 +64,11 @@ export default function WorkersPage() {
     });
     setError('');
     setShowModal(true);
+  };
+
+  const openSchedule = (w: Worker) => {
+    setSelectedWorkerForSchedule({ id: w.id, name: `${w.last_name} ${w.first_name}` });
+    setShowScheduleModal(true);
   };
 
   const setField = (k: keyof WorkerCreate, v: any) =>
@@ -178,6 +186,12 @@ export default function WorkersPage() {
                   <td className="p-3">
                     <div className="flex gap-2">
                       <button
+                        onClick={() => openSchedule(w)}
+                        className="px-2 py-1 border border-blue-300 text-blue-600 text-xs rounded hover:bg-blue-50 transition"
+                      >
+                        📅 Расписание
+                      </button>
+                      <button
                         onClick={() => openEdit(w)}
                         className="px-2 py-1 border border-primary text-primary text-xs rounded hover:bg-primary-light transition"
                       >
@@ -274,6 +288,14 @@ export default function WorkersPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showScheduleModal && selectedWorkerForSchedule && (
+        <WorkerScheduleModal
+          workerId={selectedWorkerForSchedule.id}
+          workerName={selectedWorkerForSchedule.name}
+          onClose={() => setShowScheduleModal(false)}
+        />
       )}
     </div>
   );

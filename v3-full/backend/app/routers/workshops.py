@@ -11,16 +11,24 @@ from ..dependencies import role_required
 router = APIRouter()
 
 
-@router.get("/public", response_model=list[WorkshopRead])
+@router.get("/public")
 def list_workshops_public(db: Session = Depends(get_db)):
     """
     Публичный список мастерских (без авторизации).
     Используется на форме регистрации клиента для выбора филиала.
     """
-    return db.query(Workshop).order_by(Workshop.city, Workshop.name).all()
+    from ..models.city import City
+    workshops = db.query(Workshop).join(City).order_by(City.name, Workshop.name).all()
+    return [{
+        'id': w.id,
+        'name': w.name,
+        'city_id': w.city_id,
+        'address': w.address,
+        'phone': w.phone,
+    } for w in workshops]
 
 
-@router.get("/", response_model=list[WorkshopRead])
+@router.get("/")
 def list_workshops(
     db: Session = Depends(get_db),
     user=Depends(role_required("admin", "master")),
@@ -30,12 +38,21 @@ def list_workshops(
     - Admin видит все мастерские
     - Master видит только свою мастерскую
     """
+    from ..models.city import City
     if user.role.name == "admin":
-        return db.query(Workshop).order_by(Workshop.city, Workshop.name).all()
+        workshops = db.query(Workshop).join(City).order_by(City.name, Workshop.name).all()
     else:
         # Master видит только свои мастерские
         workshop_ids = [w.id for w in user.workshops]
-        return db.query(Workshop).filter(Workshop.id.in_(workshop_ids)).all()
+        workshops = db.query(Workshop).filter(Workshop.id.in_(workshop_ids)).all()
+    
+    return [{
+        'id': w.id,
+        'name': w.name,
+        'city_id': w.city_id,
+        'address': w.address,
+        'phone': w.phone,
+    } for w in workshops]
 
 
 @router.get("/{workshop_id}", response_model=WorkshopRead)

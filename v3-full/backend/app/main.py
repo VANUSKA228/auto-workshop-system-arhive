@@ -8,14 +8,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import auth, orders, users, services, payments, workshops, workers
+from .routers import auth, orders, users, services, payments, workshops, workers, cities, worker_schedules
 
 settings = get_settings()
 
 app = FastAPI(
     title="API автосервиса",
-    description="REST API для системы управления автосервисом (ТЗ v2.0)",
-    version="1.0.0",
+    description="REST API для системы управления автосервисом (ТЗ v3.1 Scalable)",
+    version="3.1.0",
 )
 
 app.add_middleware(
@@ -33,6 +33,8 @@ app.include_router(services.router, prefix="/services", tags=["Услуги"])
 app.include_router(payments.router, prefix="/payments", tags=["Платежи"])
 app.include_router(workshops.router, prefix="/workshops", tags=["Мастерские"])
 app.include_router(workers.router, prefix="/workers", tags=["Работники"])
+app.include_router(cities.router, tags=["Города"])
+app.include_router(worker_schedules.router, tags=["Расписание техников"])
 
 
 @app.get("/")

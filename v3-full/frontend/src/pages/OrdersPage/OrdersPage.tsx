@@ -107,7 +107,7 @@ export default function OrdersPage() {
     if (!selectedOrder) return;
     setSaving(true);
     try {
-      const payload: any = { 
+      const payload: any = {
         client_first_name: editData.client_first_name,
         client_last_name: editData.client_last_name,
         client_phone: editData.client_phone,
@@ -116,14 +116,17 @@ export default function OrdersPage() {
         car_year: editData.car_year,
         description: editData.description || null,
         service_ids: editData.service_ids,
-        workshop_id: Number(editData.workshop_id),
+        // workshop_id убираем - он не требуется для обновления
       };
-      await ordersApi.update(selectedOrder.id, payload);
+      console.log('Sending payload:', payload);
+      const response = await ordersApi.update(selectedOrder.id, payload);
+      console.log('Response:', response.data);
       showToast('Заявка обновлена', 'success');
       setShowEditModal(false);
       fetchOrders();
-    } catch {
-      showToast('Не удалось сохранить', 'error');
+    } catch (error: any) {
+      console.error('Error updating order:', error);
+      showToast('Не удалось сохранить: ' + (error?.response?.data?.detail || ''), 'error');
     } finally {
       setSaving(false);
     }

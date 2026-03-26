@@ -15,7 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import get_settings
 from app.database import Base
-from app.models import Role, User, Order, OrderService, Service, Payment
+# Импортируем все модели для Alembic
+from app.models import (
+    Role, User, Order, OrderService, Service, Payment, Workshop, Worker,
+    City, WorkerSchedule, WorkerTimeOff, OrderWorker, OrderServiceWorker
+)
 
 config = context.config
 settings = get_settings()

@@ -29,7 +29,7 @@ def _can_manage_worker(db: Session, user, worker: Worker) -> bool:
     return False
 
 
-@router.get("/", response_model=list[WorkerRead])
+@router.get("/")
 def list_workers(
     db: Session = Depends(get_db),
     user=Depends(role_required("master", "admin")),
@@ -38,10 +38,9 @@ def list_workers(
     Список работников.
     - Мастер видит только работников своей мастерской.
     - Админ видит всех.
-    Поле is_assigned вычисляется по наличию незавершённых заявок.
     """
-    from ..models.user import User  # локальный импорт, чтобы избежать циклов
-
+    from ..models.user import User
+    
     q = db.query(Worker)
     role = user.role.name if user.role else None
     if role == "master":
@@ -50,34 +49,23 @@ def list_workers(
 
     workers = q.order_by(Worker.workshop_id, Worker.last_name, Worker.first_name).all()
 
-    # Флаг "назначен" — есть хотя бы одна заявка в статусе не done
-    assigned_map: dict[int, bool] = {
-        wid: True
-        for wid, in db.query(Worker.id)
-        .join(Order, Order.worker_id == Worker.id)
-        .filter(Order.status != "done")
-        .distinct()
-        .all()
-    }
-
-    # Добавляем флаг к каждому работнику
+    # Возвращаем простых dict без response_model
     result = []
     for w in workers:
-        w_dict = {
+        result.append({
             "id": w.id,
             "first_name": w.first_name,
             "last_name": w.last_name,
             "position": w.position,
             "workshop_id": w.workshop_id,
             "is_active": w.is_active,
-            "is_assigned": assigned_map.get(w.id, False),
-        }
-        result.append(w_dict)
+            "is_assigned": False,  # Пока заглушка
+        })
 
     return result
 
 
-@router.get("/workshop/{workshop_id}", response_model=list[WorkerRead])
+@router.get("/workshop/{workshop_id}")
 def list_workers_by_workshop(
     workshop_id: int,
     db: Session = Depends(get_db),
@@ -104,29 +92,18 @@ def list_workers_by_workshop(
         .all()
     )
 
-    # Флаг "назначен"
-    assigned_map: dict[int, bool] = {
-        wid: True
-        for wid, in db.query(Worker.id)
-        .join(Order, Order.worker_id == Worker.id)
-        .filter(Order.status != "done")
-        .distinct()
-        .all()
-    }
-
-    # Добавляем флаг к каждому работнику
+    # Возвращаем простых dict
     result = []
     for w in workers:
-        w_dict = {
+        result.append({
             "id": w.id,
             "first_name": w.first_name,
             "last_name": w.last_name,
             "position": w.position,
             "workshop_id": w.workshop_id,
             "is_active": w.is_active,
-            "is_assigned": assigned_map.get(w.id, False),
-        }
-        result.append(w_dict)
+            "is_assigned": False,  # Пока заглушка
+        })
 
     return result
 
